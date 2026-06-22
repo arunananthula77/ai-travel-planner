@@ -1,27 +1,26 @@
-const express = require('express');
+const express = require("express");
 const router = express.Router();
+const protect = require("../middleware/auth");
 const {
-  generateTrip,
   getUserTrips,
   getTripById,
+  generateNewTrip,
   updateTrip,
-  deleteTrip,
   regenerateDay,
+  deleteTrip,
   addActivity,
-  removeActivity,
-} = require('../controllers/tripController');
-const { protect } = require('../middleware/auth');
+  removeActivity
+} = require("../controllers/tripController");
 
-// All trip routes are protected
 router.use(protect);
 
-router.post('/generate', generateTrip);
-router.get('/', getUserTrips);
-router.get('/:id', getTripById);
-router.put('/:id', updateTrip);
-router.delete('/:id', deleteTrip);
-router.post('/:id/regenerate-day', regenerateDay);
-router.post('/:id/activity', addActivity);
-router.delete('/:id/activity', removeActivity);
+router.get("/", getUserTrips);
+router.post("/generate", generateNewTrip);
+router.get("/:id", getTripById);
+router.put("/:id", updateTrip);
+router.delete("/:id", deleteTrip);
+router.post("/:id/regenerate-day", regenerateDay);
+router.post("/:id/activity", addActivity);
+router.delete("/:id/activity", removeActivity);
 
 module.exports = router;
