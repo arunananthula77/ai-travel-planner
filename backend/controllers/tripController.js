@@ -1,7 +1,7 @@
 const Trip = require("../models/Trip");
 
 // Exponential backoff retry for Gemini API resilience
-async function fetchWithRetry(url, options, retries = 5, delay = 1000) {
+async function fetchWithRetry(url, options, retries = 3, delay = 60000) {
   try {
     const response = await fetch(url, options);
     if (!response.ok) {
@@ -15,13 +15,35 @@ async function fetchWithRetry(url, options, retries = 5, delay = 1000) {
     }
     return await response.json();
   } catch (error) {
-    if (retries > 0) {
+    if (retries > 0 && !error.message?.includes("Gemini API Error")) {
       console.log(`Request failed. Retrying in ${delay}ms... (${retries} retries left)`);
       await new Promise(resolve => setTimeout(resolve, delay));
       return fetchWithRetry(url, options, retries - 1, delay * 2);
     }
     throw error;
   }
+}
+
+// Try primary model, fall back to gemini-1.5-flash if rate limited
+async function callGeminiWithFallback(apiKey, payload) {
+  const models = ["gemini-2.0-flash", "gemini-1.5-flash"];
+  let lastError;
+  for (const model of models) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      console.log(`Trying model: ${model}`);
+      const data = await fetchWithRetry(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      }, 2, 65000);
+      return data;
+    } catch (error) {
+      console.log(`Model ${model} failed: ${error.message}`);
+      lastError = error;
+    }
+  }
+  throw lastError;
 }
 
 function buildItineraryPrompt(destination, durationDays, budgetTier, interests) {
@@ -151,7 +173,6 @@ exports.generateNewTrip = async (req, res) => {
 
   try {
     const apiKey = process.env.GEMINI_API_KEY;
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
 
     const requestPayload = {
       contents: [{ parts: [{ text: prompt }] }],
@@ -161,18 +182,13 @@ exports.generateNewTrip = async (req, res) => {
       }
     };
 
-    const data = await fetchWithRetry(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(requestPayload)
-    });
+    const data = await callGeminiWithFallback(apiKey, requestPayload);
 
     const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!rawText) {
       throw new Error("Empty response from Gemini API");
     }
 
-    // Strip any accidental markdown fences
     const cleanText = rawText.replace(/```json|```/g, "").trim();
     const aiResult = JSON.parse(cleanText);
 
@@ -244,15 +260,10 @@ exports.regenerateDay = async (req, res) => {
     );
 
     const apiKey = process.env.GEMINI_API_KEY;
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
 
-    const data = await fetchWithRetry(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { responseMimeType: "application/json", temperature: 0.8 }
-      })
+    const data = await callGeminiWithFallback(apiKey, {
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { responseMimeType: "application/json", temperature: 0.8 }
     });
 
     const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -261,7 +272,6 @@ exports.regenerateDay = async (req, res) => {
     const cleanText = rawText.replace(/```json|```/g, "").trim();
     const newDay = JSON.parse(cleanText);
 
-    // Replace the specific day in the itinerary
     trip.itinerary = trip.itinerary.map(day =>
       day.dayNumber === parseInt(dayNumber) ? newDay : day
     );
