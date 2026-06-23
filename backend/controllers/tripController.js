@@ -26,7 +26,7 @@ async function fetchWithRetry(url, options, retries = 3, delay = 60000) {
 
 // Try primary model, fall back to gemini-1.5-flash if rate limited
 async function callGeminiWithFallback(apiKey, payload) {
-  const models = ["gemini-2.0-flash-001", "gemini-1.5-flash-001"];
+  const models = ["gemini-1.5-flash-001", "gemini-1.5-flash-001"];
   let lastError;
   for (const model of models) {
     try {
